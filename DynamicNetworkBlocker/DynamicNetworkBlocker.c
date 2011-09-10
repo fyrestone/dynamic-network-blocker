@@ -104,9 +104,9 @@ typedef BOOL (WINAPI *PCREATEPROCESSWITHTOKENW)(
     __in         LPSTARTUPINFOW lpStartupInfo,
     __out        LPPROCESS_INFORMATION lpProcessInfo);
 
-static PSEND        gOrigSend		= NULL;
-static PWSASEND	    gOrigWSASend	= NULL;
-static PWSASENDTO	gOrigWSASendTo	= NULL;
+static PSEND        gOrigSend        = NULL;
+static PWSASEND        gOrigWSASend    = NULL;
+static PWSASENDTO    gOrigWSASendTo    = NULL;
 
 static PCREATEPROCESSW          gOrigCreateProcessW          = NULL;
 static PCREATEPROCESSA          gOrigCreateProcessA          = NULL;
@@ -547,15 +547,15 @@ static void *GetFuncPatchedAddr(const void *pProc)
 {
     void *ret = NULL;
 
-    const BYTE *pLongJump = ((const BYTE *)pProc - 5);			// offset: -5, len: BYTE	
-    const DWORD *pLongJumpAdr = ((const DWORD *)pProc - 1);		// offset: -4, len: DWORD
-    const WORD *pJumpBack = (const WORD *)pProc;				// offset: 0, len: WORD
+    const BYTE *pLongJump = ((const BYTE *)pProc - 5);          // offset: -5, len: BYTE    
+    const DWORD *pLongJumpAdr = ((const DWORD *)pProc - 1);     // offset: -4, len: DWORD
+    const WORD *pJumpBack = (const WORD *)pProc;                // offset: 0, len: WORD
 
     /* only process unpatched function */
-    if ((0x90 == *pLongJump) &&									// old value: 1 nop
+    if ((0x90 == *pLongJump) &&                                 // old value: 1 nop
         /* 0x90909090 */
         /* here is the pProc's entry */
-        (0xff8b == *pJumpBack))									// old value: mov edi,edi
+        (0xff8b == *pJumpBack))                                 // old value: mov edi,edi
     {
         return ((BYTE *)pProc) + 2;
     }
@@ -569,23 +569,23 @@ static int HotPatch(void *pOldProc, const void *pNewProc, void **ppOrigFn)
 
     DWORD dwOldProtect = 0;
 
-    BYTE *pLongJump = ((BYTE *)pOldProc - 5);					// offset: -5, len: BYTE
-    DWORD *pLongJumpAdr = ((DWORD *)pOldProc - 1);				// offset: -4, len: DWORD
-    WORD *pJumpBack = (WORD *)pOldProc;							// offset: 0, len: WORD
+    BYTE *pLongJump = ((BYTE *)pOldProc - 5);                   // offset: -5, len: BYTE
+    DWORD *pLongJumpAdr = ((DWORD *)pOldProc - 1);              // offset: -4, len: DWORD
+    WORD *pJumpBack = (WORD *)pOldProc;                         // offset: 0, len: WORD
 
     if (!VirtualProtect(pLongJump, 7, PAGE_EXECUTE_WRITECOPY, &dwOldProtect))
     {
         return -1;
     }
 
-    if ((0x90 == *pLongJump) &&									// old value: 1 nop
+    if ((0x90 == *pLongJump) &&                                 // old value: 1 nop
         /* 0x90909090 */
         /* here is the pOldProc's entry */
-        (0xFF8B == *pJumpBack))									// old value: mov edi,edi
+        (0xFF8B == *pJumpBack))                                 // old value: mov edi,edi
     {
-        *pLongJump = 0xE9;										// long jmp	
-        *pLongJumpAdr = ((DWORD)pNewProc) - ((DWORD)pOldProc);	// pNewProc offset
-        *pJumpBack = 0xF9EB;									// short jump back 7(back 5, plus 2 for this jump)
+        *pLongJump = 0xE9;                                      // long jmp    
+        *pLongJumpAdr = ((DWORD)pNewProc) - ((DWORD)pOldProc);  // pNewProc offset
+        *pJumpBack = 0xF9EB;                                    // short jump back 7(back 5, plus 2 for this jump)
 
         if (ppOrigFn)
             *ppOrigFn = ((BYTE *)pOldProc) + 2;
