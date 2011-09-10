@@ -79,7 +79,6 @@
     <None Include="ReadMe.txt" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\BigDaddy\BigDaddy.h" />
     <ClInclude Include="ColorPrint.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="stdafx.h" />
