@@ -104,9 +104,9 @@ typedef BOOL (WINAPI *PCREATEPROCESSWITHTOKENW)(
     __in         LPSTARTUPINFOW lpStartupInfo,
     __out        LPPROCESS_INFORMATION lpProcessInfo);
 
-static PSEND        gOrigSend        = NULL;
-static PWSASEND        gOrigWSASend    = NULL;
-static PWSASENDTO    gOrigWSASendTo    = NULL;
+static PSEND        gOrigSend       = NULL;
+static PWSASEND     gOrigWSASend    = NULL;
+static PWSASENDTO   gOrigWSASendTo  = NULL;
 
 static PCREATEPROCESSW          gOrigCreateProcessW          = NULL;
 static PCREATEPROCESSA          gOrigCreateProcessA          = NULL;
@@ -220,7 +220,7 @@ static int WSAAPI __stdcall MyWSASend(
 
     return 0;
 }
- 
+
 static int WSAAPI __stdcall MyWSASendTo(
     __in   SOCKET s,
     __in   LPWSABUF lpBuffers,
@@ -316,7 +316,7 @@ static BOOL WINAPI MyCreateProcessA(
     if (gOrigCreateProcessA)
     {
         WRITE_LOG_INFO("Intercept CreateProcessA success!");
-        
+
         ret = gOrigCreateProcessA(
             lpApplicationName,
             lpCommandLine,
@@ -792,7 +792,7 @@ static BOOL Hook()
 static int UpdateSelfPath(HMODULE hModule)
 {
     DWORD len = GetModuleFileNameA(hModule, gSelfPath, sizeof(gSelfPath));
- 
+
     if (len == sizeof(gSelfPath) || len == 0)
         return -1;
     else
@@ -836,14 +836,14 @@ BOOL APIENTRY DllMain(HINSTANCE hInst, DWORD dwReason, LPVOID lpReserved)
 {
     switch(dwReason)
     {
-        case DLL_PROCESS_ATTACH:
-            /* if DLL is loaded by LoadLibrary */
-            //if (!lpReserved)
-            //{
-                (void)Attach(hInst);
-            //}
-        default:
-            break;
+    case DLL_PROCESS_ATTACH:
+        /* if DLL is loaded by LoadLibrary */
+        //if (!lpReserved)
+        //{
+        (void)Attach(hInst);
+        //}
+    default:
+        break;
     }
 
     return TRUE;
