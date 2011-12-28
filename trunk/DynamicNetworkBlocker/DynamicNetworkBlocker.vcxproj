@@ -79,10 +79,6 @@
   <ItemGroup>
     <ClInclude Include="DynamicNetworkBlocker.h" />
     <ClInclude Include="LogFile.h" />
-    <ClInclude Include="resource.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="Resource.rc" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="DynamicNetworkBlocker.c" />
