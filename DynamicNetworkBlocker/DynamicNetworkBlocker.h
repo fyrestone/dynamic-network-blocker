@@ -14,7 +14,9 @@
     {
 #endif
 
-DLL_IMPORT int Inject(DWORD dwProcessId);
+        DLL_IMPORT BOOL LaunchW(const wchar_t *pszTargetFullPath, wchar_t *pszTargetCmd);
+        DLL_IMPORT BOOL LaunchA(const char *pszTargetFullPath, char *pszTargetCmd);
+        DLL_IMPORT int Inject(DWORD dwProcessId);
 
 #ifdef __cplusplus
     }

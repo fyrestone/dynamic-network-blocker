@@ -1,12 +1,14 @@
 #pragma comment(lib, "ws2_32.lib")
+#pragma comment(lib, "Advapi32.lib")
 
 #define BUILDING_DLL 1
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdarg.h>
 #include <tchar.h>
 #include <winsock2.h>
+#include <WS2tcpip.h>               ///< Be sure to link to ws2_32.lib.
+#include <NTSecAPI.h>               ///< Be sure to link to Advapi32.lib.
 #include <windows.h>
 #include "LogFile.h"
 #include "DynamicNetworkBlocker.h"
@@ -126,28 +128,28 @@ static int InjectSuspendedProcess(HANDLE hProcess, HANDLE hThread)
 
     do 
     {
-        /* get Kernel32.dll->LoadLibraryA address */
+        // Get Kernel32.dll->LoadLibraryA address.
         LPTHREAD_START_ROUTINE lpfLoadLibraryA = 
             (LPTHREAD_START_ROUTINE)GetProcAddress(GetModuleHandleA("Kernel32.dll"), "LoadLibraryA");
 
         if (lpfLoadLibraryA == NULL)
             break;
 
-        /* malloc a space in hVictim to store DLL name */
+        // Malloc a space in hVictim to store DLL name.
         pNameAddress = VirtualAllocEx(
             hProcess, 
             NULL, 
-            strlen(gSelfPath), 
+            strlen(gSelfPath) + 1, 
             MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
 
         if (pNameAddress == NULL)
             break;
 
-        /* write DLL name to pNameAddress */
-        if(!WriteProcessMemory(hProcess, pNameAddress, gSelfPath, strlen(gSelfPath), NULL))
+        // Write DLL name to pNameAddress.
+        if(!WriteProcessMemory(hProcess, pNameAddress, gSelfPath, strlen(gSelfPath) + 1, NULL))
             break;
 
-        /* create a remote thread to load DLL_NAME */
+        // Create a remote thread to load this dll.
         hInject = CreateRemoteThread(
             hProcess, 
             NULL, 
@@ -163,7 +165,7 @@ static int InjectSuspendedProcess(HANDLE hProcess, HANDLE hThread)
         if (hThread != INVALID_HANDLE_VALUE && hThread != NULL)
             (void)ResumeThread(hThread);
 
-        /* wait for load complete */
+        // Wait for load complete.
         (void)WaitForSingleObject(hInject, INFINITE);
 
         ret = 0;
@@ -181,6 +183,7 @@ static int WSAAPI __stdcall MySend(
     __in  int len,
     __in  int flags)
 {
+#ifdef _DEBUG
     if (gOrigSend)
     {
         WRITE_LOG_INFO("Intercept send success!");
@@ -193,6 +196,9 @@ static int WSAAPI __stdcall MySend(
     }
 
     return 0;
+#else
+    return SOCKET_ERROR;
+#endif
 }
 
 static int WSAAPI __stdcall MyWSASend(
@@ -204,6 +210,7 @@ static int WSAAPI __stdcall MyWSASend(
     __in   LPWSAOVERLAPPED lpOverlapped,
     __in   LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
+#ifdef _DEBUG
     if (gOrigWSASend)
     {
         WRITE_LOG_INFO("Intercept WSASend success!");
@@ -219,6 +226,9 @@ static int WSAAPI __stdcall MyWSASend(
     }
 
     return 0;
+#else
+    return SOCKET_ERROR;
+#endif
 }
 
 static int WSAAPI __stdcall MyWSASendTo(
@@ -232,6 +242,7 @@ static int WSAAPI __stdcall MyWSASendTo(
     __in   LPWSAOVERLAPPED lpOverlapped,
     __in   LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
+#ifdef _DEBUG
     if (gOrigWSASendTo)
     {
         WRITE_LOG_INFO("Intercept WSASendTo success!");
@@ -249,9 +260,12 @@ static int WSAAPI __stdcall MyWSASendTo(
     }
 
     return 0;
+#else
+    return SOCKET_ERROR;
+#endif
 }
 
-static BOOL WINAPI MyCreateProcessW(
+static BOOL WINAPI __stdcall MyCreateProcessW(
     __in_opt     LPCWSTR lpApplicationName,
     __inout_opt  LPWSTR lpCommandLine,
     __in_opt     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -267,6 +281,8 @@ static BOOL WINAPI MyCreateProcessW(
 
     if (gOrigCreateProcessW)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessW success!");
 
         ret = gOrigCreateProcessW(
@@ -283,11 +299,13 @@ static BOOL WINAPI MyCreateProcessW(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInformation->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInformation->hProcess, 
-                lpProcessInformation->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -299,7 +317,7 @@ static BOOL WINAPI MyCreateProcessW(
     return ret;
 }
 
-static BOOL WINAPI MyCreateProcessA(
+static BOOL WINAPI __stdcall MyCreateProcessA(
     __in_opt     LPCSTR lpApplicationName,
     __inout_opt  LPSTR lpCommandLine,
     __in_opt     LPSECURITY_ATTRIBUTES lpProcessAttributes,
@@ -315,6 +333,8 @@ static BOOL WINAPI MyCreateProcessA(
 
     if (gOrigCreateProcessA)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessA success!");
 
         ret = gOrigCreateProcessA(
@@ -331,11 +351,13 @@ static BOOL WINAPI MyCreateProcessA(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInformation->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInformation->hProcess, 
-                lpProcessInformation->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -347,7 +369,7 @@ static BOOL WINAPI MyCreateProcessA(
     return ret;
 }
 
-static BOOL WINAPI MyCreateProcessAsUserW(
+static BOOL WINAPI __stdcall MyCreateProcessAsUserW(
     __in_opt     HANDLE hToken,
     __in_opt     LPCWSTR lpApplicationName,
     __inout_opt  LPWSTR lpCommandLine,
@@ -364,6 +386,8 @@ static BOOL WINAPI MyCreateProcessAsUserW(
 
     if (gOrigCreateProcessAsUserW)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessAsUserW success!");
 
         ret = gOrigCreateProcessAsUserW(
@@ -381,11 +405,13 @@ static BOOL WINAPI MyCreateProcessAsUserW(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInformation->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInformation->hProcess, 
-                lpProcessInformation->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -397,7 +423,7 @@ static BOOL WINAPI MyCreateProcessAsUserW(
     return ret;
 }
 
-static BOOL WINAPI MyCreateProcessAsUserA(
+static BOOL WINAPI __stdcall MyCreateProcessAsUserA(
     __in_opt     HANDLE hToken,
     __in_opt     LPCSTR lpApplicationName,
     __inout_opt  LPSTR lpCommandLine,
@@ -414,6 +440,8 @@ static BOOL WINAPI MyCreateProcessAsUserA(
 
     if (gOrigCreateProcessAsUserA)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessAsUserA success!");
 
         ret = gOrigCreateProcessAsUserA(
@@ -431,11 +459,13 @@ static BOOL WINAPI MyCreateProcessAsUserA(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInformation->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInformation->hProcess, 
-                lpProcessInformation->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -447,7 +477,7 @@ static BOOL WINAPI MyCreateProcessAsUserA(
     return ret;
 }
 
-static BOOL WINAPI MyCreateProcessWithLogonW(
+static BOOL WINAPI __stdcall MyCreateProcessWithLogonW(
     __in         LPCWSTR lpUsername,
     __in_opt     LPCWSTR lpDomain,
     __in         LPCWSTR lpPassword,
@@ -464,6 +494,8 @@ static BOOL WINAPI MyCreateProcessWithLogonW(
 
     if (gOrigCreateProcessWithLogonW)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessWithLogonW success!");
 
         ret = gOrigCreateProcessWithLogonW(
@@ -481,11 +513,13 @@ static BOOL WINAPI MyCreateProcessWithLogonW(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInfo->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInfo->hProcess, 
-                lpProcessInfo->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -497,7 +531,7 @@ static BOOL WINAPI MyCreateProcessWithLogonW(
     return ret;
 }
 
-static BOOL WINAPI MyCreateProcessWithTokenW(
+static BOOL WINAPI __stdcall MyCreateProcessWithTokenW(
     __in         HANDLE hToken,
     __in         DWORD dwLogonFlags,
     __in_opt     LPCWSTR lpApplicationName,
@@ -512,6 +546,8 @@ static BOOL WINAPI MyCreateProcessWithTokenW(
 
     if (gOrigCreateProcessWithTokenW)
     {
+        const BOOL bNeedResume = !(dwCreationFlags & CREATE_SUSPENDED);
+
         WRITE_LOG_INFO("Intercept CreateProcessWithTokenW success!");
 
         ret = gOrigCreateProcessWithTokenW(
@@ -527,11 +563,13 @@ static BOOL WINAPI MyCreateProcessWithTokenW(
 
         if (ret != FALSE)
         {
+            const HANDLE hResumeThread = bNeedResume ? lpProcessInfo->hThread : NULL;
+
             if (InjectSuspendedProcess(
                 lpProcessInfo->hProcess, 
-                lpProcessInfo->hThread))
+                hResumeThread))
             {
-                WRITE_LOG_INFO("InjectSuspendedProcess failed!");
+                WRITE_LOG_INFO("InjectSuspendedProcess failed, resume thread id = 0x%0X.", hResumeThread);
             }
             else
             {
@@ -548,14 +586,12 @@ static void *GetFuncPatchedAddr(const void *pProc)
     void *ret = NULL;
 
     const BYTE *pLongJump = ((const BYTE *)pProc - 5);          // offset: -5, len: BYTE    
-    const DWORD *pLongJumpAdr = ((const DWORD *)pProc - 1);     // offset: -4, len: DWORD
+    const DWORD *pLongJumpAddr = ((const DWORD *)pProc - 1);    // offset: -4, len: DWORD
     const WORD *pJumpBack = (const WORD *)pProc;                // offset: 0, len: WORD
 
-    /* only process unpatched function */
-    if ((0x90 == *pLongJump) &&                                 // old value: 1 nop
-        /* 0x90909090 */
-        /* here is the pProc's entry */
-        (0xff8b == *pJumpBack))                                 // old value: mov edi,edi
+    if (0xFF8B == *pJumpBack &&                                 // instruction: mov edi, edi
+        ((0x90 == *pLongJump && 0x90909090 == *pLongJumpAddr) ||// unpatched value (5 nop)
+        0xE9 == *pLongJump))                                    // patched value (long jump + target addr)
     {
         return ((BYTE *)pProc) + 2;
     }
@@ -570,7 +606,7 @@ static int HotPatch(void *pOldProc, const void *pNewProc, void **ppOrigFn)
     DWORD dwOldProtect = 0;
 
     BYTE *pLongJump = ((BYTE *)pOldProc - 5);                   // offset: -5, len: BYTE
-    DWORD *pLongJumpAdr = ((DWORD *)pOldProc - 1);              // offset: -4, len: DWORD
+    DWORD *pLongJumpAddr = ((DWORD *)pOldProc - 1);             // offset: -4, len: DWORD
     WORD *pJumpBack = (WORD *)pOldProc;                         // offset: 0, len: WORD
 
     if (!VirtualProtect(pLongJump, 7, PAGE_EXECUTE_WRITECOPY, &dwOldProtect))
@@ -578,17 +614,18 @@ static int HotPatch(void *pOldProc, const void *pNewProc, void **ppOrigFn)
         return -1;
     }
 
-    if ((0x90 == *pLongJump) &&                                 // old value: 1 nop
-        /* 0x90909090 */
-        /* here is the pOldProc's entry */
-        (0xFF8B == *pJumpBack))                                 // old value: mov edi,edi
+    if (0xFF8B == *pJumpBack &&                                 // instruction: mov edi, edi
+        ((0x90 == *pLongJump && 0x90909090 == *pLongJumpAddr) ||// unpatched value (5 nop)
+        0xE9 == *pLongJump))                                    // patched value (long jump + target addr)
     {
         *pLongJump = 0xE9;                                      // long jmp    
-        *pLongJumpAdr = ((DWORD)pNewProc) - ((DWORD)pOldProc);  // pNewProc offset
+        *pLongJumpAddr = ((DWORD)pNewProc) - ((DWORD)pOldProc); // pNewProc offset
         *pJumpBack = 0xF9EB;                                    // short jump back 7(back 5, plus 2 for this jump)
 
         if (ppOrigFn)
+        {
             *ppOrigFn = ((BYTE *)pOldProc) + 2;
+        }
 
         ret = 0;
     }
@@ -607,23 +644,21 @@ static int HotUnpatch(void *pOldProc)
 
     DWORD dwOldProtect = 0;
 
-    BYTE *pLongJump = ((BYTE *)pOldProc - 5);                   // offset: -5, len: BYTE
     WORD *pJumpBack = (WORD *)pOldProc;                         // offset: 0, len: WORD
 
-    if (!VirtualProtect(pLongJump, 7, PAGE_EXECUTE_WRITECOPY, &dwOldProtect))
+    if (!VirtualProtect(pJumpBack, 2, PAGE_EXECUTE_WRITECOPY, &dwOldProtect))
     {
         return -1;
     }
 
     if (0xF9EB == *pJumpBack)
     {
-        *pLongJump = 0x90;
         *pJumpBack = 0xFF8B;
 
         ret = 0;
     }
 
-    if (!VirtualProtect(pLongJump, 7, dwOldProtect, &dwOldProtect))
+    if (!VirtualProtect(pJumpBack, 2, dwOldProtect, &dwOldProtect))
     {
         return -1;
     }
@@ -643,55 +678,46 @@ static void UnHook()
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigSend = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Ws2_32.dll"), "WSASend")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigWSASend = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Ws2_32.dll"), "WSASendTo")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigWSASendTo = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Kernel32.dll"), "CreateProcessW")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessW = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Kernel32.dll"), "CreateProcessA")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessA = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessAsUserW")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessAsUserW = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessAsUserA")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessAsUserA = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessWithLogonW")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessWithLogonW = NULL;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessWithTokenW")))
             break;
         if (HotUnpatch(pAddr))
             break;
-        gOrigCreateProcessWithTokenW = NULL;
 
         success = 1;
     } while (0);
@@ -749,28 +775,28 @@ static BOOL Hook()
             break;
         if (!(gOrigCreateProcessAsUserW = (PCREATEPROCESSASUSERW)GetFuncPatchedAddr(pAddr)))
             break;
-        if (HotPatch(pAddr, MyCreateProcessA, NULL))
+        if (HotPatch(pAddr, MyCreateProcessAsUserW, NULL))
             break;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessAsUserA")))
             break;
         if (!(gOrigCreateProcessAsUserA = (PCREATEPROCESSASUSERA)GetFuncPatchedAddr(pAddr)))
             break;
-        if (HotPatch(pAddr, MyCreateProcessA, NULL))
+        if (HotPatch(pAddr, MyCreateProcessAsUserA, NULL))
             break;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessWithLogonW")))
             break;
         if (!(gOrigCreateProcessWithLogonW = (PCREATEPROCESSWITHLOGONW)GetFuncPatchedAddr(pAddr)))
             break;
-        if (HotPatch(pAddr, MyCreateProcessA, NULL))
+        if (HotPatch(pAddr, MyCreateProcessWithLogonW, NULL))
             break;
 
         if (!(pAddr = GetProcAddress(GetModuleHandleA("Advapi32.dll"), "CreateProcessWithTokenW")))
             break;
         if (!(gOrigCreateProcessWithTokenW = (PCREATEPROCESSWITHTOKENW)GetFuncPatchedAddr(pAddr)))
             break;
-        if (HotPatch(pAddr, MyCreateProcessA, NULL))
+        if (HotPatch(pAddr, MyCreateProcessWithTokenW, NULL))
             break;
 
         success = TRUE;
@@ -791,12 +817,57 @@ static BOOL Hook()
 
 static int UpdateSelfPath(HMODULE hModule)
 {
+    // gSelfPath will be this dll's full path including terminating null character.
     DWORD len = GetModuleFileNameA(hModule, gSelfPath, sizeof(gSelfPath));
 
-    if (len == sizeof(gSelfPath) || len == 0)
+    if (len == sizeof(gSelfPath) /* overflow */|| len == 0 /* error */)
         return -1;
     else
         return 0;
+}
+
+DLL_IMPORT BOOL LaunchW(const wchar_t *pszTargetFullPath, wchar_t *pszTargetCmd)
+{
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+
+    si.cb = sizeof(si);
+
+    return CreateProcessW(pszTargetFullPath,
+        pszTargetCmd,
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &si,
+        &pi);
+}
+
+DLL_IMPORT BOOL LaunchA(const char *pszTargetFullPath, char *pszTargetCmd)
+{
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+
+    si.cb = sizeof(si);
+
+    return CreateProcessA(pszTargetFullPath,
+        pszTargetCmd,
+        NULL,
+        NULL,
+        FALSE,
+        0,
+        NULL,
+        NULL,
+        &si,
+        &pi);
 }
 
 DLL_IMPORT int Inject(DWORD dwProcessId)
@@ -807,7 +878,7 @@ DLL_IMPORT int Inject(DWORD dwProcessId)
 
     if (hVictim != NULL)
     {
-        /* don't need to resume thread */
+        // Don't need to resume thread.
         ret = InjectSuspendedProcess(hVictim, INVALID_HANDLE_VALUE);
     }
 
@@ -819,6 +890,12 @@ DLL_IMPORT int Inject(DWORD dwProcessId)
 static BOOL Attach(HINSTANCE hInst)
 {
     BOOL ret = FALSE;
+
+    // Be sure to link to ws2_32.lib.
+    freeaddrinfo(NULL);
+
+    // Be sure to link to Advapi32.lib.
+    AuditFree(NULL);
 
     if (UpdateSelfPath(hInst))
     {
@@ -837,11 +914,7 @@ BOOL APIENTRY DllMain(HINSTANCE hInst, DWORD dwReason, LPVOID lpReserved)
     switch(dwReason)
     {
     case DLL_PROCESS_ATTACH:
-        /* if DLL is loaded by LoadLibrary */
-        //if (!lpReserved)
-        //{
         (void)Attach(hInst);
-        //}
     default:
         break;
     }

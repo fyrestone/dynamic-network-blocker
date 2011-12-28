@@ -5,12 +5,13 @@
 #include <Windows.h>
 
 #ifndef _DEBUG
-    #define WRITE_LOG_INFO(info)
-    #define OPEN_LOG_FILE(self)
+    #define WRITE_LOG_INFO
+    #define OPEN_LOG_FILE
 #else
     #pragma comment(lib, "psapi.lib")
  
     #include <Psapi.h>
+    #include <stdarg.h> 
 
     static HANDLE hMutex = NULL;
     static HANDLE hLogFile = INVALID_HANDLE_VALUE;
@@ -47,10 +48,8 @@
         }
     }
 
-    static void _WriteLogInfo(const char *info)
+    static void _WriteLogInfo(const char *format, ...)
     {
-        char buffer[1024];
-
         if (hMutex == NULL)                     
         {                                       
             hMutex = CreateMutexA(              
@@ -66,6 +65,7 @@
             DWORD dwBytesWritten = 0;  
             DWORD dwPid = GetCurrentProcessId();
             HANDLE hProcess = INVALID_HANDLE_VALUE;
+            char buffer[1024];
             char name[20] = {0};
 
             hProcess = OpenProcess(
@@ -81,11 +81,31 @@
 
             (void)sprintf_s(
                 buffer, 
-                sizeof(buffer), 
-                "%6d->%-20s %s\r\n", 
+                sizeof(buffer) - 2/* \r\n */, 
+                "%6d->%-20s ", 
                 dwPid, 
-                name,
-                info);
+                name);
+
+            {
+                va_list ap;
+                va_start(ap, format);
+
+                (void)vsprintf_s(
+                    buffer + strlen(buffer),
+                    sizeof(buffer) - strlen(buffer) - 2/* \r\n */,
+                    format,
+                    ap);
+
+                va_end(ap);
+            }
+
+            {
+                char *pTmp = buffer + strlen(buffer);
+
+                *pTmp++ = '\r';
+                *pTmp++ = '\n';
+                *pTmp = '\0';
+            }
 
             (void)WriteFile(                    
                 hLogFile,                       
@@ -98,8 +118,8 @@
         (void)ReleaseMutex(hMutex);
     }
 
-    #define WRITE_LOG_INFO(info)                    \
-        _WriteLogInfo(info)
+    #define WRITE_LOG_INFO                          \
+        _WriteLogInfo
 
 
     #define OPEN_LOG_FILE(self)                     \
